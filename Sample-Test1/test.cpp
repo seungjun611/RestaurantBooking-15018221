@@ -1,41 +1,139 @@
-#include "gtest/gtest.h"
+ï»¿#include "gtest/gtest.h"
 #include "gmock/gmock.h"
 #include "../RestaurantBooking/BookingScheduler.cpp"
+#include "TestableSmsSender.cpp"
+#include "TestableMailSender.cpp"
+#include "SundayBookingScheduler.cpp"
+#include "MondayBookingScheduler.cpp"
+#include "TestableScheduler.cpp"
 
 using namespace testing;
 
-TEST(BookingSchedulerTest, ¿¹¾àÀº_Á¤½Ã¿¡¸¸_°¡´ÉÇÏ´Ù_Á¤½Ã°¡_¾Æ´Ñ°æ¿ì_¿¹¾àºÒ°¡) {
-	EXPECT_THAT(1, Eq(1));
+class BookingItem : public testing::Test {
+protected:
+	void SetUp() override {
+		NOT_ON_THE_HOUR = getTime(2021, 3, 26, 9, 5);
+		ON_THE_HOUR = getTime(2021, 3, 26, 9, 0);
+		SUNDAY = getTime(2021, 3, 28, 17, 0);
+		MONDAY = getTime(2024, 6, 3, 17, 0);
+
+		bookingScheduler.setSmsSender(&testableSmsSender);
+		bookingScheduler.setMailSender(&testableMailSender);
+	}
+public:
+	tm getTime(int year, int mon, int day, int hour, int min) {
+		tm result = { 0, min, hour, day, mon - 1, year - 1900, 0, 0, -1 };
+		mktime(&result);
+		return result;
+	}
+
+	tm plusHour(tm base, int hour) {
+		base.tm_hour += hour;
+		mktime(&base);
+		return base;
+	}
+
+	tm NOT_ON_THE_HOUR;
+	tm ON_THE_HOUR;
+	tm MONDAY;
+	tm SUNDAY;
+	Customer CUSTOMER{ "Fake name", "010-1234-5678" };
+	Customer CUSTOMER_WITH_EMAIL{ "Fake Name", "010-1234-5678", "test@test.com" };
+	const int UNDER_CAPACITY = 1;
+	const int CAPACITY_PER_HOUR = 3;
+
+	BookingScheduler bookingScheduler{ CAPACITY_PER_HOUR };
+	TestableSmsSender testableSmsSender;
+	TestableMailSender testableMailSender;
+};
+
+TEST_F(BookingItem, ì˜ˆì•½ì€_ì •ì‹œì—ë§Œ_ê°€ëŠ¥í•˜ë‹¤_ì •ì‹œê°€_ì•„ë‹Œê²½ìš°_ì˜ˆì•½ë¶ˆê°€) {
+	Schedule* schedule = new Schedule{ NOT_ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER };
+
+	//act
+	EXPECT_THROW({
+		bookingScheduler.addSchedule(schedule);
+		}, std::runtime_error);
 }
 
-TEST(BookingSchedulerTest, ¿¹¾àÀº_Á¤½Ã¿¡¸¸_°¡´ÉÇÏ´Ù_Á¤½ÃÀÎ_°æ¿ì_¿¹¾à°¡´É) {
+TEST_F(BookingItem, ì˜ˆì•½ì€_ì •ì‹œì—ë§Œ_ê°€ëŠ¥í•˜ë‹¤_ì •ì‹œì¸_ê²½ìš°_ì˜ˆì•½ê°€ëŠ¥) {
+	Schedule* schedule = new Schedule{ ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER };
 
+	//act
+	bookingScheduler.addSchedule(schedule);
+
+	//assert
+	EXPECT_EQ(true, bookingScheduler.hasSchedule(schedule));
 }
 
-TEST(BookingSchedulerTest, ½Ã°£´ëº°_ÀÎ¿øÁ¦ÇÑÀÌ_ÀÖ´Ù_°°Àº_½Ã°£´ë¿¡_Capacity_ÃÊ°úÇÒ_°æ¿ì_¿¹¿Ü¹ß»ý) {
+TEST_F(BookingItem, ì‹œê°„ëŒ€ë³„_ì¸ì›ì œí•œì´_ìžˆë‹¤_ê°™ì€_ì‹œê°„ëŒ€ì—_Capacity_ì´ˆê³¼í• _ê²½ìš°_ì˜ˆì™¸ë°œìƒ) {
+	Schedule* schedule = new Schedule(ON_THE_HOUR, CAPACITY_PER_HOUR, CUSTOMER);
+	bookingScheduler.addSchedule(schedule);
 
+	try {
+		Schedule* newSchedule = new Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER);
+		bookingScheduler.addSchedule(newSchedule);
+		FAIL();
+	}
+	catch (std::runtime_error& e) {
+		EXPECT_EQ(string{ e.what() }, string("Number of people is over restaurant capacity per hour"));
+	}
 }
 
-TEST(BookingSchedulerTest, ½Ã°£´ëº°_ÀÎ¿øÁ¦ÇÑÀÌ_ÀÖ´Ù_°°Àº_½Ã°£´ë°¡_´Ù¸£¸é_Capacity_Â÷ÀÖ¾îµµ_½ºÄÉÁì_Ãß°¡_¼º°ø) {
+TEST_F(BookingItem, ì‹œê°„ëŒ€ë³„_ì¸ì›ì œí•œì´_ìžˆë‹¤_ê°™ì€_ì‹œê°„ëŒ€ê°€_ë‹¤ë¥´ë©´_Capacity_ì°¨ìžˆì–´ë„_ìŠ¤ì¼€ì¥´_ì¶”ê°€_ì„±ê³µ) {
+	Schedule* schedule = new Schedule(ON_THE_HOUR, CAPACITY_PER_HOUR, CUSTOMER);
+	bookingScheduler.addSchedule(schedule);
 
+	tm differentHour = plusHour(ON_THE_HOUR, 1);
+	Schedule* newSchedule = new Schedule(differentHour, UNDER_CAPACITY, CUSTOMER);
+	bookingScheduler.addSchedule(newSchedule);
+
+	EXPECT_EQ(true, bookingScheduler.hasSchedule(schedule));
+	EXPECT_EQ(true, bookingScheduler.hasSchedule(newSchedule));
 }
 
-TEST(BookingSchedulerTest, ¿¹¾à¿Ï·á½Ã_SMS´Â_¹«Á¶°Ç_¹ß¼Û) {
+TEST_F(BookingItem, ì˜ˆì•½ì™„ë£Œì‹œ_SMSëŠ”_ë¬´ì¡°ê±´_ë°œì†¡) {
+	Schedule* schedule = new Schedule(ON_THE_HOUR, CAPACITY_PER_HOUR, CUSTOMER);
+	
+	bookingScheduler.addSchedule(schedule);
 
+	EXPECT_EQ(true, testableSmsSender.IsSendMethodIsCalled());
 }
 
-TEST(BookingSchedulerTest, ÀÌ¸ÞÀÏÀÌ_¾ø´Â_°æ¿ì¿¡´Â_ÀÌ¸ÞÀÏ_¹Ì¹ß¼Û) {
+TEST_F(BookingItem, ì´ë©”ì¼ì´_ì—†ëŠ”_ê²½ìš°ì—ëŠ”_ì´ë©”ì¼_ë¯¸ë°œì†¡) {
+	Schedule* schedule = new Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER);
 
+	bookingScheduler.addSchedule(schedule);
+
+	EXPECT_EQ(0, testableMailSender.getCountSendMailMethodIsCalled());
 }
 
-TEST(BookingSchedulerTest, ÀÌ¸ÞÀÏÀÌ_ÀÖ´Â_°æ¿ì¿¡´Â_ÀÌ¸ÞÀÏ_¹ß¼Û) {
+TEST_F(BookingItem, ì´ë©”ì¼ì´_ìžˆëŠ”_ê²½ìš°ì—ëŠ”_ì´ë©”ì¼_ë°œì†¡) {
+	Schedule* schedule = new Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER_WITH_EMAIL);
 
+	bookingScheduler.addSchedule(schedule);
+
+	EXPECT_EQ(1, testableMailSender.getCountSendMailMethodIsCalled());
 }
 
-TEST(BookingSchedulerTest, ÇöÀç³¯Â¥°¡_ÀÏ¿äÀÏÀÎ_°æ¿ì_¿¹¾àºÒ°¡_¿¹¿ÜÃ³¸®) {
+TEST_F(BookingItem, í˜„ìž¬ë‚ ì§œê°€_ì¼ìš”ì¼ì¸_ê²½ìš°_ì˜ˆì•½ë¶ˆê°€_ì˜ˆì™¸ì²˜ë¦¬) {
+	BookingScheduler* bookingScheduler = new TestableScheduler(CAPACITY_PER_HOUR, SUNDAY);
 
+	try {
+		Schedule* schedule = new Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER_WITH_EMAIL);
+		bookingScheduler->addSchedule(schedule);
+		FAIL();
+	}
+	catch (std::runtime_error& e) {
+		EXPECT_EQ(string(e.what()), string("Booking system is not available on sunday"));
+	}
 }
 
-TEST(BookingSchedulerTest, ÇöÀç³¯Â¥°¡_ÀÏ¿äÀÏÀÌ_¾Æ´Ñ°æ¿ì_¿¹¾à°¡´É) {
+TEST_F(BookingItem, í˜„ìž¬ë‚ ì§œê°€_ì¼ìš”ì¼ì´_ì•„ë‹Œê²½ìš°_ì˜ˆì•½ê°€ëŠ¥) {
+	BookingScheduler* bookingScheduler = new TestableScheduler(CAPACITY_PER_HOUR, MONDAY);
+	
+	Schedule* schedule = new Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER_WITH_EMAIL);
+	bookingScheduler->addSchedule(schedule);
 
+	EXPECT_EQ(true, bookingScheduler->hasSchedule(schedule));
 }
